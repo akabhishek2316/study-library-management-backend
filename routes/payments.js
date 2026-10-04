@@ -171,7 +171,11 @@ router.get('/verify/:token', async (req, res) => {
 
 /* ---------- Student: online payment ---------- */
 
-router.post('/razorpay/order', allow('student'), async (req, res) => {
+router.post(
+  '/razorpay/order',
+  protect,
+  allow('student'),
+  async (req, res) => {
   if (!razorpayOn()) {
     throw bad(
       503,
@@ -253,7 +257,22 @@ router.post('/razorpay/order', allow('student'), async (req, res) => {
   })
 })
 
-router.post('/razorpay/verify', allow('student'), async (req, res) => {
+router.get(
+  '/config',
+  protect,
+  allow('student'),
+  (req, res) => {
+    res.json({
+      online: razorpayOn(),
+    })
+  }
+)
+
+router.post(
+  '/razorpay/verify',
+  protect,
+  allow('student'),
+  async (req, res) => {
   const {
     razorpay_order_id: orderId,
     razorpay_payment_id: paymentId,
@@ -297,18 +316,23 @@ router.post('/razorpay/verify', allow('student'), async (req, res) => {
 
 /* ---------- Student: own payments ---------- */
 
-router.get('/mine', allow('student'), async (req, res) => {
-  res.json(
-    await withRefs(
-      Payment.find({
-        student: req.user._id,
-        status: 'paid'
-      })
-        .sort({ paidAt: -1 })
-        .limit(100)
+router.get(
+  '/mine',
+  protect,
+  allow('student'),
+  async (req, res) => {
+    res.json(
+      await withRefs(
+        Payment.find({
+          student: req.user._id,
+          status: 'paid',
+        })
+          .sort({ paidAt: -1 })
+          .limit(100)
+      )
     )
-  )
-})
+  }
+)
 
 /* ---------- Staff: dues, history, manual entry, refund ---------- */
 
