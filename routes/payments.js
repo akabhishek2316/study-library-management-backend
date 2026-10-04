@@ -90,44 +90,84 @@ export async function razorpayWebhook(req, res) {
   res.json({ ok: true })
 }
 
-// QR code scan verify without login
-
+// PUBLIC: Verify payment / refund receipt
 router.get('/verify/:token', async (req, res) => {
-  const payment = await Payment.findOne({
-    verifyToken: req.params.token,
-    status: 'paid'
-  }).select('receiptNo amount method type paidAt status')
+  try {
+    const { token } = req.params
 
-  if (!payment) {
-    return res.status(404).json({
+    if (!token || !/^[a-f0-9]{48}$/i.test(token)) {
+      return res.status(400).json({
+        valid: false,
+        status: 'INVALID',
+        message: 'Invalid receipt verification link.'
+      })
+    }
+
+    const payment = await Payment.findOne({
+      verifyToken: token,
+      status: 'paid'
+    })
+      .select(
+        'receiptNo amount method type paidAt status verifyToken membership student'
+      )
+      .populate('student', 'name')
+      .populate({
+        path: 'membership',
+        select: 'startDate endDate status plan seat shift',
+        populate: [
+          { path: 'plan', select: 'name' },
+          { path: 'seat', select: 'number' },
+          { path: 'shift', select: 'name' }
+        ]
+      })
+      .lean()
+
+    if (!payment) {
+      return res.status(404).json({
+        valid: false,
+        status: 'INVALID',
+        message: 'Receipt could not be verified.'
+      })
+    }
+
+    const isRefund = payment.type === 'refund'
+    const membership = payment.membership
+
+    return res.json({
+      valid: true,
+      status: 'VERIFIED',
+      type: payment.type,
+      receiptNo: payment.receiptNo,
+      amount: payment.amount,
+      method: payment.method,
+      paidAt: payment.paidAt,
+      message: isRefund
+        ? 'This refund receipt matches a record in the library system.'
+        : 'This receipt matches a payment record in the library system.',
+      student: {
+        name: payment.student?.name || 'N/A'
+      },
+      membership: membership
+        ? {
+            plan: membership.plan?.name || 'N/A',
+            seat: membership.seat?.number || 'N/A',
+            shift: membership.shift?.name || 'N/A',
+            startDate: membership.startDate,
+            endDate: membership.endDate,
+            status: membership.status
+          }
+        : null
+    })
+  } catch (error) {
+    console.error('Receipt verification error:', error)
+
+    return res.status(500).json({
       valid: false,
-      status: 'INVALID',
-      message: 'Receipt could not be verified.'
+      status: 'ERROR',
+      message: 'Unable to verify receipt right now.'
     })
   }
-
-  res.json({
-    valid: true,
-    status: 'VERIFIED',
-    receiptNo: payment.receiptNo,
-    amount: payment.amount,
-    method: payment.method,
-    type: payment.type,
-    paidAt: payment.paidAt,
-    message: 'This receipt matches a payment record in the library system.'
-  })
 })
-
-router.use(protect)
-
-router.get('/config', (req, res) =>
-  res.json({
-    online: razorpayOn(),
-    keyId: razorpayOn()
-      ? process.env.RAZORPAY_KEY_ID
-      : null
-  })
-)
 
 /* ---------- Student: online payment ---------- */
 
@@ -465,7 +505,7 @@ router.post('/:id/refund', allow('owner'), async (req, res) => {
 
 /* ---------- Receipt PDF (staff, or the student it belongs to) ---------- */
 
-router.get('/:id/receipt', async (req, res) => {
+router.get('/:id/receipt',protect, async (req, res) => {
   const p = await withRefs(
     Payment.findById(req.params.id)
   )
