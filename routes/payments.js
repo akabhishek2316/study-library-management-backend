@@ -26,7 +26,10 @@ const router = Router()
 
 const METHODS = ['cash', 'upi', 'bank', 'card']
 
-const staff = allow('owner', 'staff')
+const staff = [
+  protect,
+  allow('owner', 'staff'),
+]
 
 const withRefs = (q) =>
   q
@@ -459,7 +462,11 @@ router.post('/', staff, async (req, res) => {
 
 // Records a refund (owner only). For online payments, also refund it in the Razorpay dashboard.
 
-router.post('/:id/refund', allow('owner'), async (req, res) => {
+router.post(
+  '/:id/refund',
+  protect,
+  allow('owner'),
+  async (req, res) => {
   const orig = await Payment.findById(req.params.id)
 
   if (
