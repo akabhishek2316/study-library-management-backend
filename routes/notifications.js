@@ -73,6 +73,17 @@ router.patch('/:id/read', async (req, res) => {
   })
 })
 
+
+router.delete('/', async (req, res) => {
+  await Notification.deleteMany({
+    user: req.user._id,
+  })
+
+  res.json({
+    message: 'All notifications cleared',
+  })
+})
+
 // Run the daily reminders right now (handy for testing, or if your host sleeps at 9 AM)
 
 router.post(

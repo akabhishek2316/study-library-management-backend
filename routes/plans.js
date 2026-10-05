@@ -31,6 +31,14 @@ const lengthOf = (period = 'custom', durationDays) => {
 
 const router = Router()
 
+router.get('/public', async (req, res) => {
+  const plans = await Plan.find({ active: true })
+    .populate('shift')
+    .sort({ price: 1 })
+
+  res.json(plans)
+})
+
 router.use(protect)
 
 router.get('/', async (req, res) => {

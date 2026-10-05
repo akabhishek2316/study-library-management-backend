@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
 
     phone: {
       type: String,
+      required: true,
       trim: true
     },
 
@@ -34,11 +35,116 @@ const userSchema = new mongoose.Schema(
       default: 'student'
     },
 
-    photo: String,
+    photo: {
+      url: String,
+      publicId: String
+    },
 
-    idProof: String,
+    idProof: {
+      url: String,
+      publicId: String
+    },
 
-    emergencyContact: String,
+    idProofType: {
+      type: String,
+      enum: [
+        'Aadhaar',
+        'PAN',
+        'Driving Licence',
+        'Voter ID',
+        'Other'
+      ],
+      trim: true
+    },
+
+    idProofNumber: {
+      type: String,
+      trim: true
+    },
+
+    dob: {
+      type: Date
+    },
+
+    gender: {
+      type: String,
+      enum: [
+        'Male',
+        'Female',
+        'Other',
+        'Prefer not to say'
+      ]
+    },
+
+    address: {
+      type: String,
+      trim: true
+    },
+
+    city: {
+      type: String,
+      trim: true
+    },
+
+    state: {
+      type: String,
+      trim: true
+    },
+
+    pincode: {
+      type: String,
+      trim: true
+    },
+
+    emergencyContact: {
+      name: {
+        type: String,
+        trim: true
+      },
+
+      relationship: {
+        type: String,
+        trim: true
+      },
+
+      phone: {
+        type: String,
+        trim: true
+      }
+    },
+
+    studentType: {
+      type: String,
+      enum: [
+        'Student',
+        'Working Professional'
+      ]
+    },
+
+    institution: {
+      type: String,
+      trim: true
+    },
+
+    course: {
+      type: String,
+      trim: true
+    },
+
+    yearSemester: {
+      type: String,
+      trim: true
+    },
+
+    admissionStatus: {
+      type: String,
+      enum: [
+        'pending',
+        'approved',
+        'rejected'
+      ],
+      default: 'pending'
+    },
 
     joinDate: {
       type: Date,
@@ -51,17 +157,27 @@ const userSchema = new mongoose.Schema(
       default: 'active'
     }
   },
-  { timestamps: true }
+  {
+    timestamps: true
+  }
 )
 
 userSchema.pre('save', async function () {
   if (this.isModified('password')) {
-    this.password = await bcrypt.hash(this.password, 10)
+    this.password = await bcrypt.hash(
+      this.password,
+      10
+    )
   }
 })
 
-userSchema.methods.matchPassword = function (plain) {
-  return bcrypt.compare(plain, this.password)
+userSchema.methods.matchPassword = function (
+  plain
+) {
+  return bcrypt.compare(
+    plain,
+    this.password
+  )
 }
 
 userSchema.methods.toSafe = function () {
@@ -72,4 +188,7 @@ userSchema.methods.toSafe = function () {
   return o
 }
 
-export default mongoose.model('User', userSchema)
+export default mongoose.model(
+  'User',
+  userSchema
+)

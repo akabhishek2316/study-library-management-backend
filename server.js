@@ -4,7 +4,7 @@ import cors from 'cors'
 import cron from 'node-cron'
 
 import { connectDB } from './config/db.js'
-
+import admissionRoutes from './routes/admissions.js'
 import authRoutes from './routes/auth.js'
 import studentRoutes from './routes/students.js'
 import seatRoutes from './routes/seats.js'
@@ -25,6 +25,7 @@ import reportRoutes from './routes/reports.js'
 import { loadSettings } from './utils/settings.js'
 import { runReminders } from './utils/reminders.js'
 import { autoCloseOpenSessions } from './utils/attendance.js'
+import seatChangeRequestRoutes from './routes/seatChangeRequests.js'
 
 const app = express()
 
@@ -49,6 +50,7 @@ app.get('/api/health', (req, res) =>
 )
 
 app.use('/api/auth', authRoutes)
+app.use('/api/admissions', admissionRoutes)
 app.use('/api/students', studentRoutes)
 app.use('/api/seats', seatRoutes)
 app.use('/api/shifts', shiftRoutes)
@@ -62,6 +64,11 @@ app.use('/api/notices', noticeRoutes)
 app.use('/api/feedback', feedbackRoutes)
 app.use('/api/settings', settingsRoutes)
 app.use('/api/reports', reportRoutes)
+app.use(
+  '/api/seat-change-requests',
+  seatChangeRequestRoutes
+)
+
 
 app.use((req, res) =>
   res.status(404).json({ message: 'Route not found' })
@@ -99,6 +106,8 @@ app.use((err, req, res, next) => {
     message: err.message || 'Internal server error',
   })
 })
+
+
 
 await connectDB()
 

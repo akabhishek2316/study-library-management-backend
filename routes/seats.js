@@ -15,7 +15,7 @@ import {
 
 const router = Router()
 
-router.use(protect, allow('owner', 'staff'))
+router.use(protect)
 
 const sorted = () =>
   Seat.find()
@@ -34,7 +34,10 @@ router.get('/', async (req, res) =>
 
 // Seat map for one date + one shift: each seat is available / occupied / maintenance
 
-router.get('/map', async (req, res) => {
+router.get(
+  '/map',
+  allow('owner', 'staff', 'student'),
+  async (req, res) => {
   const shift = await Shift.findById(req.query.shift)
 
   if (!shift) {
