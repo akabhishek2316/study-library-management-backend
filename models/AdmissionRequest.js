@@ -6,24 +6,24 @@ const admissionRequestSchema =
       user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: true,
       },
 
       plan: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Plan',
-        required: true
+        required: true,
       },
 
-      seat: {
+      preferredHall: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Seat',
-        required: true
+        ref: 'Hall',
+        required: true,
       },
 
       message: {
         type: String,
-        trim: true
+        trim: true,
       },
 
       status: {
@@ -31,22 +31,32 @@ const admissionRequestSchema =
         enum: [
           'pending',
           'approved',
-          'rejected'
+          'rejected',
         ],
-        default: 'pending'
+        default: 'pending',
       },
 
       adminNote: {
         type: String,
-        trim: true
+        trim: true,
       },
 
-      reviewedAt: Date
+      reviewedAt: Date,
     },
     {
-      timestamps: true
+      timestamps: true,
     }
   )
+
+admissionRequestSchema.index({
+  user: 1,
+  status: 1,
+})
+
+admissionRequestSchema.index({
+  preferredHall: 1,
+  status: 1,
+})
 
 export default mongoose.model(
   'AdmissionRequest',

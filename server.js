@@ -27,6 +27,7 @@ import { runReminders } from './utils/reminders.js'
 import { autoCloseOpenSessions } from './utils/attendance.js'
 import seatChangeRequestRoutes from './routes/seatChangeRequests.js'
 
+
 const app = express()
 
 app.use(

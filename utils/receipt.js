@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit'
 import QRCode from 'qrcode'
 import crypto from 'node:crypto'
+import { cfg } from './config.js'
 
 const C = {
   navy: '#163253',
@@ -55,11 +56,24 @@ export async function streamReceipt(res, payment, balanceDue) {
   const refund = payment.type === 'refund'
   const membership = payment.membership
 
-  const libraryName =
-    process.env.LIBRARY_NAME || 'Reading Room the Library'
+  const settings = cfg()
 
-  // Prepare QR before starting the HTTP response.
-  const frontendUrl = process.env.FRONTEND_URL
+const libraryName =
+  settings.libraryName ||
+  process.env.LIBRARY_NAME ||
+  'Study Library'
+
+const libraryAddress =
+  settings.address ||
+  process.env.LIBRARY_ADDRESS ||
+  ''
+
+const libraryPhone =
+  settings.phone ||
+  process.env.LIBRARY_PHONE ||
+  ''
+
+const frontendUrl = process.env.FRONTEND_URL
 
   if (!frontendUrl) {
     throw new Error('FRONTEND_URL is not configured')
@@ -188,7 +202,7 @@ export async function streamReceipt(res, payment, balanceDue) {
   outline(L, 19, CW, 75, C.navy, 6)
   outline(L + 10, 29, 29, 29, C.navy, 5)
 
-  txt('RL', L + 10, 37, 29, {
+  txt('SL', L + 10, 37, 29, {
     size: 12,
     bold: true,
     color: C.navy,
@@ -201,18 +215,18 @@ export async function streamReceipt(res, payment, balanceDue) {
     color: C.navy,
   })
 
-  if (process.env.LIBRARY_ADDRESS) {
-    txt(
-      process.env.LIBRARY_ADDRESS,
-      L + 47,
-      45,
-      CW - 58,
-      {
-        size: 6.5,
-        color: C.muted,
-      }
-    )
-  }
+  if (libraryAddress) {
+  txt(
+    libraryAddress,
+    L + 47,
+    45,
+    CW - 58,
+    {
+      size: 6.5,
+      color: C.muted,
+    }
+  )
+}
 
   txt(
     refund ? 'REFUND RECEIPT' : 'PAYMENT RECEIPT',
@@ -332,7 +346,7 @@ export async function streamReceipt(res, payment, balanceDue) {
   section('Membership details', 263)
 
   // QR is placed in its own reserved right-side column.
-  const qrSize = 48
+  const qrSize = 75
   const qrX = R - qrSize
   const qrY = 281
   const detailsRight = qrX - 12
@@ -341,47 +355,57 @@ export async function streamReceipt(res, payment, balanceDue) {
   const detailCol2 = L + detailHalf + 4
   const detailColW = detailHalf - 4
 
-  if (membership) {
-    label('Membership plan', L, 282, detailColW)
+if (membership) {
+  label('Membership plan', L, 282, detailColW)
 
-    txt(
-      membership.plan?.name || '-',
-      L,
-      293,
-      detailColW,
-      { size: 7.5 }
-    )
+  txt(
+    membership.plan?.name || '-',
+    L,
+    293,
+    detailColW,
+    { size: 7.5 }
+  )
 
-    label('Shift', detailCol2, 282, detailColW)
+  label('Shift', detailCol2, 282, detailColW)
 
-    txt(
-      membership.shift?.name || '-',
-      detailCol2,
-      293,
-      detailColW,
-      { size: 7.5 }
-    )
+  txt(
+    membership.shift?.name || '-',
+    detailCol2,
+    293,
+    detailColW,
+    { size: 7.5 }
+  )
 
-    label('Seat number', L, 311, detailColW)
+  label('Hall', L, 311, detailColW)
 
-    txt(
-      membership.seat?.number || '-',
-      L,
-      322,
-      detailColW,
-      { size: 7.5 }
-    )
+  txt(
+    membership.hall?.name || '-',
+    L,
+    322,
+    detailColW,
+    { size: 7.5 }
+  )
 
-    label('Membership period', detailCol2, 311, detailColW)
+  label('Seat number', detailCol2, 311, detailColW)
 
-    txt(
-      `${day(membership.startDate)} - ${day(membership.endDate)}`,
-      detailCol2,
-      322,
-      detailColW,
-      { size: 6.8 }
-    )
-  }
+  txt(
+    membership.seat?.number || '-',
+    detailCol2,
+    322,
+    detailColW,
+    { size: 7.5 }
+  )
+
+  label('Membership period', L, 340, detailsWidth)
+
+  txt(
+    `${day(membership.startDate)} - ${day(membership.endDate)}`,
+    L,
+    351,
+    detailsWidth,
+    { size: 6.8 }
+  )
+}
 
   doc.image(qrDataUrl, qrX, qrY, {
     width: qrSize,
@@ -401,7 +425,7 @@ export async function streamReceipt(res, payment, balanceDue) {
   )
 
   // BALANCE — full-width panel below details and QR
-  const balanceY = 342
+  const balanceY = 375
 
   outline(L, balanceY, CW, 29, C.border, 5)
 
@@ -432,13 +456,13 @@ export async function streamReceipt(res, payment, balanceDue) {
 
   // Optional note gets its own row.
   if (payment.note) {
-    label('Note', L, 380, CW)
+  label('Note', L, 413, CW)
 
-    txt(payment.note, L, 390, CW, {
-      size: 7,
-      height: 10,
-    })
-  }
+  txt(payment.note, L, 423, CW, {
+    size: 7,
+    height: 10,
+  })
+}
 
   // SIGNATURE AND STAMP
   const signTop = H - 107

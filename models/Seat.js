@@ -2,39 +2,55 @@ import mongoose from 'mongoose'
 
 const seatSchema = new mongoose.Schema(
   {
+    hall: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Hall',
+      required: true,
+    },
+
     number: {
       type: String,
       required: true,
-      unique: true,
-      trim: true
+      trim: true,
     },
-
-    section: {
-      type: String,
-      default: 'Main Hall',
-      trim: true
-    },
-
-    type: {
-      type: String,
-      enum: ['Non-AC', 'AC', 'Cabin'],
-      default: 'Non-AC'
-    },
-
-    // "occupied" is NOT stored: it depends on date + shift, so it is computed from memberships.
 
     status: {
       type: String,
-      enum: ['active', 'maintenance'],
-      default: 'active'
+      enum: [
+        'active',
+        'maintenance',
+      ],
+      default: 'active',
     },
 
     position: {
-      x: Number,
-      y: Number
-    }
+      x: {
+        type: Number,
+        default: 0,
+      },
+
+      y: {
+        type: Number,
+        default: 0,
+      },
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 )
 
-export default mongoose.model('Seat', seatSchema)
+seatSchema.index(
+  {
+    hall: 1,
+    number: 1,
+  },
+  {
+    unique: true,
+  }
+)
+
+export default mongoose.model(
+  'Seat',
+  seatSchema
+)

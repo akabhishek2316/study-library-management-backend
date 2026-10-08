@@ -40,6 +40,7 @@ const hours = (m) =>
 const membershipRefs = (q) =>
   q
     .populate('student', 'name phone')
+    .populate('hall', 'name')
     .populate('seat', 'number')
     .populate('plan', 'name')
     .populate('shift', 'name')
@@ -86,8 +87,7 @@ export async function students() {
         col('Name', 'name', 24),
         col('Email', 'email', 28),
         col('Phone', 'phone'),
-        col('Emergency contact', 'emergency', 20),
-        col('Joined', 'joined', 12),
+col('Joined', 'joined', 12),
         col('Account', 'status', 10),
         col('Seat', 'seat', 8),
         col('Plan', 'plan', 20),
@@ -102,10 +102,13 @@ export async function students() {
           name: s.name,
           email: s.email,
           phone: s.phone || '',
-          emergency: s.emergencyContact || '',
+          
           joined: day(s.createdAt),
           status: s.status,
-          seat: m?.seat?.number || '',
+          seat:
+  m?.hall?.name && m?.seat?.number
+    ? `${m.hall.name} - ${m.seat.number}`
+    : m?.seat?.number || '',
           plan: m?.plan?.name || '',
           shift: m?.shift?.name || '',
           till: m ? day(m.endDate) : '',
@@ -143,19 +146,23 @@ export async function payments({ from, to } = {}) {
     .sort({ paidAt: -1 })
     .limit(20000)
     .populate('student', 'name phone')
-    .populate({
-      path: 'membership',
-      populate: [
-        {
-          path: 'seat',
-          select: 'number'
-        },
-        {
-          path: 'plan',
-          select: 'name'
-        }
-      ]
-    })
+   .populate({
+  path: 'membership',
+  populate: [
+    {
+      path: 'hall',
+      select: 'name'
+    },
+    {
+      path: 'seat',
+      select: 'number'
+    },
+    {
+      path: 'plan',
+      select: 'name'
+    }
+  ]
+})
 
   let net = 0
 
@@ -173,7 +180,11 @@ export async function payments({ from, to } = {}) {
       student: p.student?.name || '',
       phone: p.student?.phone || '',
       plan: p.membership?.plan?.name || '',
-      seat: p.membership?.seat?.number || '',
+      seat:
+  p.membership?.hall?.name &&
+  p.membership?.seat?.number
+    ? `${p.membership.hall.name} - ${p.membership.seat.number}`
+    : p.membership?.seat?.number || '',
       type: p.type,
       method: p.method,
       amount: signed,
@@ -243,7 +254,10 @@ export async function dues() {
         ...list.map((m) => ({
           student: m.student?.name,
           phone: m.student?.phone || '',
-          seat: m.seat?.number,
+          seat:
+  m.hall?.name && m.seat?.number
+    ? `${m.hall.name} - ${m.seat.number}`
+    : m.seat?.number || '',
           plan: m.plan?.name,
           shift: m.shift?.name,
           ends: day(m.endDate),
@@ -291,7 +305,10 @@ export async function memberships() {
       rows: ms.map((m) => ({
         student: m.student?.name,
         phone: m.student?.phone || '',
-        seat: m.seat?.number,
+        seat:
+  m.hall?.name && m.seat?.number
+    ? `${m.hall.name} - ${m.seat.number}`
+    : m.seat?.number || '',
         plan: m.plan?.name,
         shift: m.shift?.name,
         start: day(m.startDate),

@@ -148,29 +148,33 @@ router.get(
       todayDate()
 
     const current =
-      await Membership.find({
-        student: {
-          $in: students.map(
-            (s) => s._id
-          ),
-        },
-        status: {
-          $in: [
-            'active',
-            'paused',
-          ],
-        },
-        startDate: {
-          $lte: today,
-        },
-        endDate: {
-          $gte: today,
-        },
-      })
-        .populate(
-          'seat',
-          'number section type'
-        )
+  await Membership.find({
+    student: {
+      $in: students.map(
+        (s) => s._id
+      ),
+    },
+    status: {
+      $in: [
+        'active',
+        'paused',
+      ],
+    },
+    startDate: {
+      $lte: today,
+    },
+    endDate: {
+      $gte: today,
+    },
+  })
+    .populate(
+      'hall',
+      'name type description'
+    )
+    .populate(
+      'seat',
+      'number section type'
+    )
         .populate(
           'plan',
           'name price durationDays'
@@ -262,26 +266,30 @@ router.get(
       todayDate()
 
     const membership =
-      await Membership.findOne({
-        student:
-          student._id,
-        status: {
-          $in: [
-            'active',
-            'paused',
-          ],
-        },
-        startDate: {
-          $lte: today,
-        },
-        endDate: {
-          $gte: today,
-        },
-      })
-        .populate(
-          'seat',
-          'number section type'
-        )
+  await Membership.findOne({
+    student:
+      student._id,
+    status: {
+      $in: [
+        'active',
+        'paused',
+      ],
+    },
+    startDate: {
+      $lte: today,
+    },
+    endDate: {
+      $gte: today,
+    },
+  })
+    .populate(
+      'hall',
+      'name type description'
+    )
+    .populate(
+      'seat',
+      'number section type'
+    )
         .populate(
           'plan',
           'name price durationDays'

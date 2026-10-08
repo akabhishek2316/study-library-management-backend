@@ -6,6 +6,8 @@
     "dev": "nodemon server.js",
     "start": "node server.js",
     "seed": "node seed.js",
+    "seed:halls": "node scripts/seedHalls.js",
+    "migrate:remove-sections": "node scripts/migrateRemoveSections.js",
     "restore": "node scripts/restore.js"
   },
   "dependencies": {

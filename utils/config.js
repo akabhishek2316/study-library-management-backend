@@ -39,7 +39,10 @@ export const cfg = () => {
       process.env.LIBRARY_ADDRESS ??
       '',
 
-    phone: overrides.phone ?? '',
+    phone:
+  overrides.phone ??
+  process.env.LIBRARY_PHONE ??
+  '',
 
     closeTime:
       overrides.closeTime ||

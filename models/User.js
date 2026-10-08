@@ -117,7 +117,8 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: [
         'Student',
-        'Working Professional'
+        'Working Professional',
+        'Other'
       ]
     },
 

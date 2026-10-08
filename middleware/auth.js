@@ -46,22 +46,14 @@ export const protect = async (req, res, next) => {
   }
 }
 
-export const allow = (...roles) => (req, res, next) => {
+export const allow = (...roles) => (
+  req,
+  res,
+  next
+) => {
   if (!roles.includes(req.user.role)) {
     return res.status(403).json({
       message: 'Not allowed'
-    })
-  }
-
-  if (
-    req.user.role === 'student' &&
-    req.user.admissionStatus !== 'approved'
-  ) {
-    return res.status(403).json({
-      message:
-        req.user.admissionStatus === 'rejected'
-          ? 'Admission request was rejected.'
-          : 'Admission is pending. Please wait for approval.'
     })
   }
 
