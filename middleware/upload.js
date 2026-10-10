@@ -16,11 +16,13 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     if (!allowedTypes.includes(file.mimetype)) {
-      return cb(
-        new Error(
-          'Only JPG, PNG, WebP images and PDF files are allowed'
-        )
+      const err = new Error(
+        'Only JPG, PNG, WebP images and PDF files are allowed'
       )
+
+      err.status = 400
+
+      return cb(err)
     }
 
     cb(null, true)

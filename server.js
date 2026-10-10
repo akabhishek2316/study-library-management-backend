@@ -26,13 +26,56 @@ import { loadSettings } from './utils/settings.js'
 import { runReminders } from './utils/reminders.js'
 import { autoCloseOpenSessions } from './utils/attendance.js'
 import seatChangeRequestRoutes from './routes/seatChangeRequests.js'
+import {
+  sanitizeInput,
+  securityHeaders,
+  apiLimiter,
+  bookingLock,
+} from './middleware/security.js'
 
+
+// Fail fast with a clear message instead of strange errors later
+for (const name of ['MONGO_URI', 'JWT_SECRET']) {
+  if (!process.env[name]) {
+    console.error(`Missing required environment variable: ${name}`)
+    process.exit(1)
+  }
+}
+
+// In production a weak or copied-from-example secret would let anyone forge login tokens
+if (
+  process.env.NODE_ENV === 'production' &&
+  (process.env.JWT_SECRET.length < 32 ||
+    process.env.JWT_SECRET.startsWith('change-this'))
+) {
+  console.error(
+    'JWT_SECRET is too weak for production. Use a long random string (32+ characters).'
+  )
+  process.exit(1)
+}
 
 const app = express()
 
+app.disable('x-powered-by')
+
+// Render/Heroku sit behind a proxy: needed so req.ip (rate limiting) is the real client
+app.set('trust proxy', 1)
+
+// Security headers (nosniff, no framing, CSP, HSTS in production, no cache)
+app.use(securityHeaders)
+
+// CLIENT_URL can hold several sites separated by commas.
+// (Before, an empty CLIENT_URL silently blocked every browser request.)
+const allowedOrigins = (
+  process.env.CLIENT_URL || 'http://localhost:5173'
+)
+  .split(',')
+  .map((s) => s.trim().replace(/\/$/, ''))
+  .filter(Boolean)
+
 app.use(
   cors({
-    origin: (process.env.CLIENT_URL || '*').split(','),
+    origin: allowedOrigins,
     credentials: true,
   })
 )
@@ -44,19 +87,25 @@ app.post(
   razorpayWebhook
 )
 
-app.use(express.json())
+app.use(express.json({ limit: '1mb' }))
+
+// remove "$operator" / "a.b" keys from body, query and params (NoSQL injection)
+app.use(sanitizeInput)
+
+// broad per-IP limit for the whole API
+app.use('/api', apiLimiter)
 
 app.get('/api/health', (req, res) =>
   res.json({ ok: true })
 )
 
 app.use('/api/auth', authRoutes)
-app.use('/api/admissions', admissionRoutes)
+app.use('/api/admissions', bookingLock, admissionRoutes)
 app.use('/api/students', studentRoutes)
 app.use('/api/seats', seatRoutes)
 app.use('/api/shifts', shiftRoutes)
 app.use('/api/plans', planRoutes)
-app.use('/api/memberships', membershipRoutes)
+app.use('/api/memberships', bookingLock, membershipRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/payments', paymentRoutes)
 app.use('/api/attendance', attendanceRoutes)
@@ -67,6 +116,7 @@ app.use('/api/settings', settingsRoutes)
 app.use('/api/reports', reportRoutes)
 app.use(
   '/api/seat-change-requests',
+  bookingLock,
   seatChangeRequestRoutes
 )
 
@@ -95,6 +145,15 @@ app.use((err, req, res, next) => {
     })
   }
 
+  if (err.name === 'MulterError') {
+    return res.status(400).json({
+      message:
+        err.code === 'LIMIT_FILE_SIZE'
+          ? 'File is too large (maximum 5 MB)'
+          : err.message,
+    })
+  }
+
   if (!err.status) {
     console.error(err)
   }
@@ -103,12 +162,23 @@ app.use((err, req, res, next) => {
     return next(err)
   }
 
-  res.status(err.status || 500).json({
-    message: err.message || 'Internal server error',
+  const status = err.status || 500
+
+  res.status(status).json({
+    // do not leak internal error text to the browser in production
+    message:
+      status === 500 &&
+      process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : err.message || 'Internal server error',
   })
 })
 
 
+
+process.on('unhandledRejection', (reason) =>
+  console.error('Unhandled rejection:', reason)
+)
 
 await connectDB()
 

@@ -46,7 +46,7 @@ router.get('/mine', allow('student'), async (req, res) =>
 
 router.get('/', allow('owner', 'staff'), async (req, res) => {
   const q = req.query.status
-    ? { status: req.query.status }
+    ? { status: String(req.query.status) }
     : {}
 
   res.json(
@@ -93,6 +93,23 @@ router.patch('/:id', allow('owner', 'staff'), async (req, res) => {
       .populate('student', 'name phone')
       .populate('repliedBy', 'name')
   )
+})
+
+// staff can remove feedback that is already resolved
+router.delete('/:id', allow('owner', 'staff'), async (req, res) => {
+  const item = await Feedback.findById(req.params.id)
+
+  if (!item) {
+    throw bad(404, 'Feedback not found')
+  }
+
+  if (item.status !== 'resolved') {
+    throw bad(400, 'Resolve the feedback before deleting it')
+  }
+
+  await item.deleteOne()
+
+  res.json({ message: 'Feedback deleted' })
 })
 
 export default router

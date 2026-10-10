@@ -10,6 +10,7 @@ import {
 } from '../middleware/auth.js'
 
 import upload from '../middleware/upload.js'
+import { checkUploadedFiles } from '../middleware/security.js'
 import cloudinary from '../config/cloudinary.js'
 
 import {
@@ -118,7 +119,7 @@ router.get(
     }
 
     if (status !== 'all') {
-      filter.status = status
+      filter.status = String(status)
     }
 
     if (q) {
@@ -214,18 +215,29 @@ router.post(
 
     if (
       !data.name ||
-      !data.email
+      !data.email ||
+      !data.phone
     ) {
       throw bad(
         400,
-        'Name and email are required'
+        'Name, email and phone are required'
+      )
+    }
+
+    if (
+      req.body.password &&
+      String(req.body.password).length < 8
+    ) {
+      throw bad(
+        400,
+        'Password must be at least 8 characters'
       )
     }
 
     const tempPassword =
       req.body.password ||
       crypto
-        .randomBytes(4)
+        .randomBytes(6)
         .toString('hex')
 
     const student =
@@ -358,6 +370,7 @@ router.post(
       maxCount: 1,
     },
   ]),
+  checkUploadedFiles,
   async (req, res) => {
     const student =
       await User.findOne({

@@ -148,6 +148,15 @@ router.put('/:id', staff, async (req, res) => {
   res.json(n)
 })
 
+// remove every notice whose end date has passed
+router.delete('/expired/all', staff, async (req, res) => {
+  const result = await Notice.deleteMany({
+    expiresAt: { $lt: new Date() },
+  })
+
+  res.json({ deleted: result.deletedCount })
+})
+
 router.delete('/:id', staff, async (req, res) => {
   await Notice.findByIdAndDelete(req.params.id)
 

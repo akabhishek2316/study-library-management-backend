@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { rateLimit } from '../middleware/rateLimit.js'
 import Attendance from '../models/Attendance.js'
 import Membership from '../models/Membership.js'
 import User from '../models/User.js'
@@ -39,6 +40,13 @@ import {
 } from '../utils/attendanceKiosk.js'
 
 const router = Router()
+
+// The 6-digit kiosk activation code can be guessed, so limit tries
+const activateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many activation attempts. Please try again later.',
+})
 
 // router.use(protect)
 
@@ -241,6 +249,7 @@ router.post(
 
 router.post(
   '/kiosk/activate',
+  activateLimit,
   async (req, res) => {
     const code = String(
       req.body.code || ''
@@ -468,7 +477,16 @@ router.get(
   async (req, res) => {
     const { month, rows } = await monthlyReport(req.query.month)
 
-    const q = (v) => `"${String(v).replace(/"/g, '""')}"`
+    const q = (v) => {
+      let s = String(v ?? '')
+
+      // stop spreadsheet formula injection (=, +, -, @)
+      if (/^[=+\-@\t\r]/.test(s)) {
+        s = `'${s}`
+      }
+
+      return `"${s.replace(/"/g, '""')}"`
+    }
 
     const lines = [
       [

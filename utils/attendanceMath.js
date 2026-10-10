@@ -7,10 +7,19 @@ import { cfg } from './config.js'
 
 const rotate = () => cfg().qrRotateSeconds
 
-const secret = () =>
-  process.env.ATTENDANCE_SECRET ||
-  process.env.JWT_SECRET ||
-  'dev-secret'
+const secret = () => {
+  const s =
+    process.env.ATTENDANCE_SECRET ||
+    process.env.JWT_SECRET
+
+  if (!s) {
+    throw new Error(
+      'ATTENDANCE_SECRET or JWT_SECRET must be set'
+    )
+  }
+
+  return s
+}
 
 const slotOf = (ms = Date.now()) =>
   Math.floor(ms / 1000 / rotate())

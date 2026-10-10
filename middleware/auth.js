@@ -5,7 +5,7 @@ export const signToken = (id) =>
   jwt.sign(
     { id },
     process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: '7d', algorithm: 'HS256' }
   )
 
 export const protect = async (req, res, next) => {
@@ -22,9 +22,10 @@ export const protect = async (req, res, next) => {
   }
 
   try {
-    const { id } = jwt.verify(
+    const { id, iat } = jwt.verify(
       token,
-      process.env.JWT_SECRET
+      process.env.JWT_SECRET,
+      { algorithms: ['HS256'] }
     )
 
     const user = await User.findById(id)
@@ -33,6 +34,16 @@ export const protect = async (req, res, next) => {
     if (!user || user.status !== 'active') {
       return res.status(401).json({
         message: 'Account not active'
+      })
+    }
+
+    // a token created before the last password change is no longer valid
+    if (
+      user.passwordChangedAt &&
+      Math.floor(user.passwordChangedAt.getTime() / 1000) > iat
+    ) {
+      return res.status(401).json({
+        message: 'Password was changed. Please log in again.'
       })
     }
 

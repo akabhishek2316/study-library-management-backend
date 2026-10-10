@@ -3,7 +3,7 @@ import Payment from '../models/Payment.js'
 import Counter from '../models/Counter.js'
 import Membership from '../models/Membership.js'
 import { todayDate } from './dates.js'
-import { notify } from './notify.js'
+import { notify, notifyStaff } from './notify.js'
 
 const NET = {
   $cond: [
@@ -119,6 +119,9 @@ export async function markPaid(payment, extra = {}) {
       status: 'paid',
       paidAt: new Date(),
       ...extra,
+      ...(extra.razorpayPaymentId
+        ? { transactionId: String(extra.razorpayPaymentId) }
+        : {}),
     },
     { new: true }
   )
@@ -136,6 +139,31 @@ export async function markPaid(payment, extra = {}) {
     message: `Rs. ${claimed.amount} received online. Receipt ${claimed.receiptNo}.`,
     link: '/student',
   })
+
+  // Two online orders for the same membership can both be paid.
+  // Money is already taken, so do not hide it: flag it for a refund.
+  try {
+    const membership = await Membership.findById(claimed.membership)
+    const paid = (await paidByMembership([claimed.membership])).get(
+      String(claimed.membership)
+    )
+
+    if (membership && paid > Number(membership.amount) + 0.001) {
+      const extra = +(paid - Number(membership.amount)).toFixed(2)
+
+      claimed.note = `OVERPAID by Rs. ${extra}: please refund`
+      await claimed.save()
+
+      notifyStaff({
+        type: 'payment',
+        title: 'Overpayment: refund needed',
+        message: `Receipt ${claimed.receiptNo} is Rs. ${extra} more than the due amount.`,
+        link: '/admin/payments',
+      })
+    }
+  } catch {
+    // the payment itself is already saved; the check is only a safety net
+  }
 
   return claimed
 }

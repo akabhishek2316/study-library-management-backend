@@ -308,6 +308,22 @@ const frontendUrl = process.env.FRONTEND_URL
     }
   )
 
+  // UPI / bank / card reference, printed so the payment can be matched with the bank statement
+  if (payment.transactionId) {
+    txt(
+      `Txn ID: ${String(payment.transactionId).slice(0, 40)}`,
+      L + 10,
+      144,
+      CW - 20,
+      {
+        size: 7,
+        bold: true,
+        color: C.navy,
+        align: 'right',
+      }
+    )
+  }
+
   // PAYMENT INFORMATION — fixed, separate columns
   const COL2 = L + HALF + 5
   const COLW = HALF - 5

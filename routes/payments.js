@@ -2,6 +2,7 @@ import { Router } from 'express'
 
 import Payment from '../models/Payment.js'
 import Membership from '../models/Membership.js'
+import User from '../models/User.js'
 
 import { protect, allow } from '../middleware/auth.js'
 
@@ -21,8 +22,16 @@ import {
 
 import { streamReceipt } from '../utils/receipt.js'
 import { notify } from '../utils/notify.js'
+import { rateLimit } from '../middleware/rateLimit.js'
 
 const router = Router()
+
+// public receipt check
+const verifyLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: 'Too many checks. Please wait a minute.',
+})
 
 const METHODS = [
   'cash',
@@ -30,6 +39,17 @@ const METHODS = [
   'bank',
   'card',
 ]
+
+// UTR / UPI ref / RRN / cheque no.: letters, digits, - _ / only
+const TXN_RE = /^[A-Za-z0-9][A-Za-z0-9\-_/]{5,39}$/
+
+const cleanTxn = (value) =>
+  typeof value === 'string' ? value.trim().toUpperCase() : ''
+
+const maskTxn = (value) =>
+  value
+    ? `${'*'.repeat(Math.max(0, value.length - 4))}${value.slice(-4)}`
+    : null
 
 const staff = [
   protect,
@@ -145,6 +165,7 @@ export async function razorpayWebhook(
 
 router.get(
   '/verify/:token',
+  verifyLimit,
   async (req, res) => {
     try {
       const { token } = req.params
@@ -167,7 +188,7 @@ router.get(
           status: 'paid',
         })
           .select(
-            'receiptNo amount method type paidAt status verifyToken membership student'
+            'receiptNo amount method transactionId type paidAt status verifyToken membership student'
           )
           .populate(
             'student',
@@ -222,6 +243,8 @@ router.get(
         receiptNo: payment.receiptNo,
         amount: payment.amount,
         method: payment.method,
+        // public page: only the last 4 characters
+        transactionId: maskTxn(payment.transactionId),
         paidAt: payment.paidAt,
         message: isRefund
           ? 'This refund receipt matches a record in the library system.'
@@ -321,6 +344,28 @@ router.post(
       throw bad(
         400,
         `Enter an amount between 1 and ${m.due}`
+      )
+    }
+
+    // old unpaid attempts older than a day are just clutter
+    await Payment.deleteMany({
+      student: req.user._id,
+      method: 'online',
+      status: 'pending',
+      createdAt: { $lt: new Date(Date.now() - 86400000) },
+    })
+
+    // at most 3 open payment attempts per membership
+    const open = await Payment.countDocuments({
+      membership: m._id,
+      method: 'online',
+      status: 'pending',
+    })
+
+    if (open >= 3) {
+      throw bad(
+        429,
+        'You already have payments in progress. Please finish them or wait a few minutes.'
       )
     }
 
@@ -549,16 +594,42 @@ router.get(
       student,
     } = req.query
 
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1)
+    const limit = Math.min(100, Math.max(5, parseInt(req.query.limit, 10) || 25))
+    const search = String(req.query.search || '').trim().slice(0, 60)
+
     const q = {
       status: 'paid',
     }
 
+    // search: receipt number, transaction id, student name / phone / email
+    if (search) {
+      const re = new RegExp(
+        search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        'i'
+      )
+
+      const people = await User.find(
+        {
+          role: 'student',
+          $or: [{ name: re }, { phone: re }, { email: re }],
+        },
+        '_id'
+      ).limit(200).lean()
+
+      q.$or = [
+        { receiptNo: re },
+        { transactionId: re },
+        { student: { $in: people.map((x) => x._id) } },
+      ]
+    }
+
     if (method) {
-      q.method = method
+      q.method = String(method)
     }
 
     if (student) {
-      q.student = student
+      q.student = String(student)
     }
 
     if (from || to) {
@@ -585,28 +656,37 @@ router.get(
       }
     }
 
-    const items =
-      await withRefs(
-        Payment.find(q)
-          .sort({
-            paidAt: -1,
-          })
-          .limit(500)
-      )
+    const [items, total, grouped] =
+      await Promise.all([
+        withRefs(
+          Payment.find(q)
+            .sort({ paidAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+        ),
+
+        Payment.countDocuments(q),
+
+        // totals cover the whole filter, not just this page
+        Payment.aggregate([
+          { $match: q },
+          {
+            $group: {
+              _id: '$type',
+              sum: { $sum: '$amount' },
+            },
+          },
+        ]),
+      ])
 
     const sum = (type) =>
-      items
-        .filter(
-          (p) => p.type === type
-        )
-        .reduce(
-          (s, p) =>
-            s + p.amount,
-          0
-        )
+      grouped.find((g) => g._id === type)?.sum || 0
 
     res.json({
       items,
+      page,
+      pages: Math.max(1, Math.ceil(total / limit)),
+      total,
       totals: {
         collected:
           sum('payment'),
@@ -631,6 +711,7 @@ router.post(
       amount,
       method,
       note,
+      transactionId,
     } = req.body
 
     const amt = Number(amount)
@@ -647,6 +728,32 @@ router.post(
         400,
         'Choose cash, upi, bank or card'
       )
+    }
+
+    // everything except cash needs the bank / UPI reference
+    let txn = ''
+
+    if (method !== 'cash') {
+      txn = cleanTxn(transactionId)
+
+      if (!TXN_RE.test(txn)) {
+        throw bad(
+          400,
+          'Enter the transaction ID / UTR / reference number (6-40 letters, digits, - _ /)'
+        )
+      }
+
+      const used = await Payment.exists({
+        transactionId: txn,
+        type: 'payment',
+      })
+
+      if (used) {
+        throw bad(
+          409,
+          'This transaction ID is already recorded for another payment'
+        )
+      }
     }
 
     const found =
@@ -690,7 +797,8 @@ router.post(
         membership: found._id,
         amount: amt,
         method,
-        note,
+        transactionId: txn || undefined,
+        note: typeof note === 'string' ? note.slice(0, 300) : undefined,
         status: 'paid',
         paidAt: new Date(),
         receiptNo:
@@ -698,6 +806,18 @@ router.post(
         recordedBy:
           req.user._id,
       })
+
+    // two staff members paying at the same moment: undo if it went over the due
+    const [after] = await withDues([found])
+
+    if (after.paid > Number(found.amount) + 0.001) {
+      await Payment.findByIdAndDelete(p._id)
+
+      throw bad(
+        409,
+        'Another payment was recorded at the same time. Please refresh and check the due amount.'
+      )
+    }
 
     notify(found.student, {
       type: 'payment',
@@ -794,7 +914,11 @@ router.post(
         refundOf: orig._id,
         amount: amt,
         method,
-        note: req.body.note,
+        transactionId:
+          method !== 'cash' && TXN_RE.test(cleanTxn(req.body.transactionId))
+            ? cleanTxn(req.body.transactionId)
+            : undefined,
+        note: typeof req.body.note === 'string' ? req.body.note.slice(0, 300) : undefined,
         status: 'paid',
         paidAt: new Date(),
         receiptNo:
@@ -845,7 +969,7 @@ router.get(
       req.user.role ===
         'student' &&
       String(
-        p.student._id
+        p.student?._id
       ) !==
         String(
           req.user._id
@@ -857,15 +981,15 @@ router.get(
       )
     }
 
-    const membership =
-      await Membership.findById(
-        p.membership._id
-      )
+    const membership = p.membership
+      ? await Membership.findById(
+          p.membership._id
+        )
+      : null
 
-    const [m] =
-      await withDues([
-        membership,
-      ])
+    const [m] = membership
+      ? await withDues([membership])
+      : [{ due: 0 }]
 
     await streamReceipt(
       res,

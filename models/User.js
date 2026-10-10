@@ -26,7 +26,11 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true,
-      minlength: 6
+      minlength: 8
+    },
+
+    passwordChangedAt: {
+      type: Date
     },
 
     role: {
@@ -167,8 +171,13 @@ userSchema.pre('save', async function () {
   if (this.isModified('password')) {
     this.password = await bcrypt.hash(
       this.password,
-      10
+      12
     )
+
+    // old login tokens stop working after a password change
+    if (!this.isNew) {
+      this.passwordChangedAt = new Date(Date.now() - 1000)
+    }
   }
 })
 
@@ -185,6 +194,7 @@ userSchema.methods.toSafe = function () {
   const o = this.toObject()
 
   delete o.password
+  delete o.passwordChangedAt
 
   return o
 }

@@ -70,3 +70,31 @@ export async function findConflict({
 
   return null
 }
+
+/**
+ * All seats that are booked for these dates AND an overlapping shift.
+ * One database query, so "available seats" screens stay fast
+ * (before, it ran 2 queries for every single seat).
+ */
+export async function bookedSeatIds({
+  shift,
+  startDate,
+  endDate,
+}) {
+  const rows = await Membership.find({
+    status: { $in: ['active', 'paused'] },
+    startDate: { $lte: endDate },
+    endDate: { $gte: startDate },
+  })
+    .select('seat shift')
+    .populate('shift', 'startTime endTime')
+    .lean()
+
+  return new Set(
+    rows
+      .filter(
+        (m) => m.shift && timesOverlap(m.shift, shift)
+      )
+      .map((m) => String(m.seat))
+  )
+}

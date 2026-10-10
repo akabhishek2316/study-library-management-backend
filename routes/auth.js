@@ -6,19 +6,68 @@ import { protect, signToken } from '../middleware/auth.js'
 
 import { bad } from '../utils/dates.js'
 
+import { rateLimit } from '../middleware/rateLimit.js'
+
 const router = Router()
+
+// Slow down password guessing and fake sign-ups
+const loginLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  message: 'Too many login attempts. Please wait a few minutes and try again.',
+  key: (req) =>
+    `${req.ip}:${String(req.body?.email || '').toLowerCase()}`,
+})
+
+const changePasswordLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many attempts. Please wait a few minutes and try again.',
+  key: (req) => req.ip,
+})
+
+const MIN_PASSWORD = 8
+const MAX_PASSWORD = 72 // bcrypt only reads the first 72 bytes
+
+const registerLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: 'Too many sign-ups from this network. Please try again later.',
+})
 
 // Student self-registration (role is always "student"; the owner creates owner/staff accounts directly)
 
-router.post('/register', async (req, res) => {
+router.post('/register', registerLimit, async (req, res) => {
   const { name, email, phone, password } = req.body
 
-  if (!name || !email || !password) {
-    throw bad(400, 'Name, email and password are required')
+  // only plain text is accepted (an object here would be a NoSQL-injection attempt)
+  if (
+    [name, email, phone, password].some(
+      (v) => v !== undefined && typeof v !== 'string'
+    )
+  ) {
+    throw bad(400, 'Invalid input')
   }
 
-  if (password.length < 6) {
-    throw bad(400, 'Password must be at least 6 characters')
+  if (!name || !email || !phone || !password) {
+    throw bad(
+      400,
+      'Name, email, phone and password are required'
+    )
+  }
+
+  if (
+    typeof password !== 'string' ||
+    !/^\S+@\S+\.\S+$/.test(String(email).trim())
+  ) {
+    throw bad(400, 'Enter a valid email and password')
+  }
+
+  if (password.length < MIN_PASSWORD || password.length > MAX_PASSWORD) {
+    throw bad(
+      400,
+      `Password must be ${MIN_PASSWORD}-${MAX_PASSWORD} characters`
+    )
   }
 
   const user = await User.create({
@@ -35,14 +84,14 @@ router.post('/register', async (req, res) => {
   })
 })
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimit, async (req, res) => {
   const { email, password } = req.body
 
   const user = await User.findOne({
-    email: String(email || '').toLowerCase()
+    email: String(email || '').trim().toLowerCase()
   })
 
-  if (!user || !(await user.matchPassword(password || ''))) {
+  if (!user || !(await user.matchPassword(String(password || '')))) {
     throw bad(401, 'Wrong email or password')
   }
 
@@ -59,12 +108,20 @@ router.post('/login', async (req, res) => {
 
 router.post(
   '/change-password',
+  changePasswordLimit,
   protect,
   async (req, res) => {
     const {
       currentPassword,
       newPassword,
     } = req.body
+
+    if (
+      typeof currentPassword !== 'string' ||
+      typeof newPassword !== 'string'
+    ) {
+      throw bad(400, 'Invalid input')
+    }
 
     if (
       !currentPassword ||
@@ -76,10 +133,13 @@ router.post(
       )
     }
 
-    if (newPassword.length < 6) {
+    if (
+      newPassword.length < MIN_PASSWORD ||
+      newPassword.length > MAX_PASSWORD
+    ) {
       throw bad(
         400,
-        'New password must be at least 6 characters'
+        `New password must be ${MIN_PASSWORD}-${MAX_PASSWORD} characters`
       )
     }
 
@@ -113,7 +173,7 @@ router.post(
 
     if (!matches) {
       throw bad(
-        401,
+        400,
         'Current password is incorrect'
       )
     }
@@ -122,16 +182,18 @@ router.post(
 
     await user.save()
 
+    // old tokens are now invalid, so hand back a fresh one
     res.json({
       message:
         'Password changed successfully',
+      token: signToken(user._id),
     })
   }
 )
 
 router.get('/me', protect, (req, res) =>
   res.json({
-    user: req.user
+    user: req.user.toSafe()
   })
 )
 

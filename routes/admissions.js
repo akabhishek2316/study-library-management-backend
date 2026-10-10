@@ -14,6 +14,7 @@ import {
 } from '../middleware/auth.js'
 
 import upload from '../middleware/upload.js'
+import { checkUploadedFiles } from '../middleware/security.js'
 
 import {
   bad,
@@ -21,13 +22,25 @@ import {
   planEndDate,
 } from '../utils/dates.js'
 
-import { findConflict } from '../utils/conflicts.js'
+import {
+  findConflict,
+  bookedSeatIds,
+} from '../utils/conflicts.js'
+
+import { rateLimit } from '../middleware/rateLimit.js'
 
 import {
   uploadBuffer,
 } from '../utils/cloudinary.js'
 
 const router = Router()
+
+// Public form: stop bots from flooding it
+const applyLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 15,
+  message: 'Too many admission requests from this network. Please try again later.',
+})
 
 // Public: available halls for selected plan
 router.get(
@@ -44,7 +57,7 @@ router.get(
 
     const selectedPlan =
       await Plan.findOne({
-        _id: plan,
+        _id: String(plan),
         active: true,
       }).populate('shift')
 
@@ -71,50 +84,46 @@ router.get(
         name: 1,
       })
 
-    const result = []
+    // One query for bookings + one for seats
+    // (before: 2 queries for every seat, on a public page)
+    const [booked, activeSeats] = await Promise.all([
+      bookedSeatIds({
+        shift: selectedPlan.shift,
+        startDate,
+        endDate,
+      }),
+      Seat.find({ status: 'active' })
+        .select('hall')
+        .lean(),
+    ])
 
-    for (const hall of halls) {
-      const seats =
-        await Seat.find({
-          hall: hall._id,
-          status: 'active',
-        })
+    const freeByHall = new Map()
 
-      let availableSeats = 0
+    for (const seat of activeSeats) {
+      if (booked.has(String(seat._id))) continue
 
-      for (const seat of seats) {
-        const conflict =
-          await findConflict({
-            seatId: seat._id,
-            shift:
-              selectedPlan.shift,
-            startDate,
-            endDate,
-          })
+      const key = String(seat.hall)
 
-        if (!conflict) {
-          availableSeats += 1
-        }
-      }
+      freeByHall.set(key, (freeByHall.get(key) || 0) + 1)
+    }
 
-      result.push({
+    res.json(
+      halls.map((hall) => ({
         _id: hall._id,
         name: hall.name,
         type: hall.type,
-        description:
-          hall.description,
+        description: hall.description,
         capacity: hall.capacity,
-        availableSeats,
-      })
-    }
-
-    res.json(result)
+        availableSeats: freeByHall.get(String(hall._id)) || 0,
+      }))
+    )
   }
 )
 
 // Public: admission request
 router.post(
   '/',
+  applyLimit,
   upload.fields([
     {
       name: 'photo',
@@ -125,6 +134,7 @@ router.post(
       maxCount: 1,
     },
   ]),
+  checkUploadedFiles,
   async (req, res) => {
     const {
       name,
@@ -171,11 +181,12 @@ router.post(
       )
     }
 
-    if (password.length < 6) {
-      throw bad(
-        400,
-        'Password must be at least 6 characters'
-      )
+    if (
+      typeof password !== 'string' ||
+      typeof email !== 'string' ||
+      password.length > 72
+    ) {
+      throw bad(400, 'Invalid email or password')
     }
 
     if (
@@ -228,22 +239,51 @@ router.post(
     }
 
     const normalizedEmail =
-      String(email).toLowerCase()
+      String(email).trim().toLowerCase()
+
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      throw bad(400, 'Enter a valid email address')
+    }
 
     let existingUser =
       await User.findOne({
         email: normalizedEmail,
       })
 
-    if (
-      existingUser &&
-      existingUser.status === 'active' &&
-      existingUser.admissionStatus ===
-        'approved'
-    ) {
+    if (existingUser) {
+      // SECURITY: this form is public. It must never touch an
+      // owner/staff account or take over someone else's student account.
+      if (
+        existingUser.role !== 'student' ||
+        (existingUser.status === 'active' &&
+          existingUser.admissionStatus === 'approved')
+      ) {
+        throw bad(
+          409,
+          'An account with this email already exists'
+        )
+      }
+
+      // Applying again (for example after a rejection) is allowed only
+      // for the real owner of the account: same password required.
+      if (
+        !(await existingUser.matchPassword(
+          String(password)
+        ))
+      ) {
+        throw bad(
+          409,
+          'An account with this email already exists. To apply again, enter the password you used before.'
+        )
+      }
+    }
+
+    // new accounts need a proper password (people re-applying already
+    // proved they know their old one above)
+    if (!existingUser && password.length < 8) {
       throw bad(
-        409,
-        'An account with this email already exists'
+        400,
+        'Password must be at least 8 characters'
       )
     }
 
@@ -263,8 +303,7 @@ router.post(
 
       existingUser.name = name
       existingUser.phone = phone
-      existingUser.password =
-        password
+      // password stays as it is (it was already checked above)
 
       existingUser.dob =
         dob || undefined
@@ -682,25 +721,15 @@ router.get(
         number: 1,
       })
 
-    const available = []
+    const booked = await bookedSeatIds({
+      shift: plan.shift,
+      startDate,
+      endDate,
+    })
 
-    for (const seat of seats) {
-      const conflict =
-        await findConflict({
-          seatId:
-            seat._id,
-
-          shift:
-            plan.shift,
-
-          startDate,
-          endDate,
-        })
-
-      if (!conflict) {
-        available.push(seat)
-      }
-    }
+    const available = seats.filter(
+      (seat) => !booked.has(String(seat._id))
+    )
 
     res.json({
       hall: {
@@ -1030,6 +1059,39 @@ router.put(
     res.json({
       message:
         'Admission rejected. The student can login to view the admission status.',
+    })
+  }
+)
+
+// Owner can clear old rejected requests so the list stays short
+router.delete(
+  '/:id',
+  protect,
+  allow('owner'),
+  async (req, res) => {
+    const request =
+      await AdmissionRequest.findById(
+        req.params.id
+      )
+
+    if (!request) {
+      throw bad(
+        404,
+        'Admission request not found'
+      )
+    }
+
+    if (request.status !== 'rejected') {
+      throw bad(
+        400,
+        'Only rejected requests can be deleted'
+      )
+    }
+
+    await request.deleteOne()
+
+    res.json({
+      message: 'Request deleted',
     })
   }
 )

@@ -33,6 +33,15 @@ let owner =
 
 
 if (!owner) {
+  // never create a production owner with the public default password
+  if (
+    process.env.NODE_ENV === 'production' &&
+    !process.env.OWNER_PASSWORD
+  ) {
+    console.error('Set OWNER_PASSWORD before seeding in production.')
+    process.exit(1)
+  }
+
   owner =
     await User.create({
       name:

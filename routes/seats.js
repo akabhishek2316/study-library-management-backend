@@ -20,6 +20,60 @@ import {
 
 const router = Router()
 
+// Hall.capacity is always recounted from the real seats (it used to drift
+// when seats were added/removed by several requests at once).
+const syncCapacity = async (hallId) => {
+  if (!hallId) return
+
+  const count = await Seat.countDocuments({ hall: hallId })
+
+  await Hall.findByIdAndUpdate(hallId, {
+    capacity: Math.max(1, count),
+  })
+}
+
+// Floor objects come from the browser: keep only known fields and sane values.
+const num = (v, min, max, fallback) => {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback
+}
+
+const color = (v, fallback) =>
+  typeof v === 'string' && /^(#[0-9a-fA-F]{3,8}|transparent)$/.test(v)
+    ? v
+    : fallback
+
+export const cleanFloorObjects = (list) =>
+  (Array.isArray(list) ? list : [])
+    .slice(0, 200)
+    .filter((o) => o && ['rect', 'circle', 'text'].includes(o.type))
+    .map((o) => ({
+      id: String(o.id || '').slice(0, 60) ||
+        `floor-object-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: o.type,
+      x: num(o.x, -20, 120, 40),
+      y: num(o.y, -20, 120, 40),
+      width: num(o.width, 2, 120, 20),
+      height: num(o.height, 2, 120, 12),
+      rotation: num(o.rotation, -360, 360, 0),
+      ...(o.auto === true ? { auto: true } : {}),
+      background: color(o.background, '#e2e8f0'),
+      backgroundOpacity: num(o.backgroundOpacity, 0, 1, 0.7),
+      borderColor: color(o.borderColor, '#64748b'),
+      borderWidth: num(o.borderWidth, 0, 12, 2),
+      ...(o.type === 'text'
+        ? {
+            text: String(o.text ?? '').slice(0, 120),
+            color: color(o.color, '#0f172a'),
+            fontSize: num(o.fontSize, 8, 72, 18),
+            fontWeight: num(o.fontWeight, 100, 900, 600),
+            textAlign: ['left', 'center', 'right'].includes(o.textAlign)
+              ? o.textAlign
+              : 'center',
+          }
+        : {}),
+    }))
+
 router.use(protect)
 
 const sorted = () =>
@@ -107,6 +161,7 @@ router.get(
     const [
       seats,
       memberships,
+      hallFloors,
     ] = await Promise.all([
       sorted().lean(),
 
@@ -132,6 +187,8 @@ router.get(
           'name phone'
         )
         .lean(),
+
+      Hall.find({}, 'floor').lean(),
     ])
 
     const booked =
@@ -158,6 +215,18 @@ router.get(
     res.json({
       date: day,
 
+      // decoration + board height of every hall, saved in the database
+      floors: Object.fromEntries(
+        hallFloors.map((h) => [
+          String(h._id),
+          {
+            ratio: h.floor?.ratio ?? null,
+            seatPct: h.floor?.seatPct ?? null,
+            objects: h.floor?.objects ?? [],
+          },
+        ])
+      ),
+
       seats: seats.map(
         (seat) => {
           const membership =
@@ -180,10 +249,7 @@ router.get(
 
             state,
 
-            occupant:
-              membership &&
-              membership.student
-                ? {
+            occupant: req.user.role !== 'student' && membership && membership.student ? {
                     name:
                       membership
                         .student
@@ -253,7 +319,7 @@ router.post(
       )
     }
 
-    if (!number?.trim()) {
+    if (!String(number ?? '').trim()) {
       throw bad(
         400,
         'Seat number is required'
@@ -273,8 +339,7 @@ router.post(
       )
     }
 
-    const cleanNumber =
-      number.trim()
+    const cleanNumber = String(number).trim()
 
     const existing =
       await Seat.findOne({
@@ -303,9 +368,7 @@ router.post(
         position,
       })
 
-    selectedHall.capacity += 1
-
-    await selectedHall.save()
+    await syncCapacity(selectedHall._id)
 
     const created =
       await Seat.findById(
@@ -579,14 +642,7 @@ router.post(
     )
 
     // Existing hall capacity
-    if (
-      !createdNewHall
-    ) {
-      selectedHall.capacity +=
-        count
-
-      await selectedHall.save()
-    }
+    await syncCapacity(selectedHall._id)
 
     // ----------------------------------------------
     // RESPONSE
@@ -691,9 +747,44 @@ router.put(
       )
     }
 
+    // floor decoration (rectangles / circles / text) and board height
+    let floorSaved = false
+
+    if (
+      req.body.hall &&
+      mongoose.isValidObjectId(req.body.hall)
+    ) {
+      const floor = {}
+
+      if (Array.isArray(req.body.objects)) {
+        floor['floor.objects'] = cleanFloorObjects(req.body.objects)
+      }
+
+      if (Number.isFinite(Number(req.body.ratio))) {
+        floor['floor.ratio'] = num(req.body.ratio, 0.3, 12, 0.72)
+      }
+
+      if ('seatPct' in req.body) {
+        floor['floor.seatPct'] =
+          req.body.seatPct === null || req.body.seatPct === ''
+            ? null
+            : num(req.body.seatPct, 2, 12, null)
+      }
+
+      if (Object.keys(floor).length) {
+        const hall = await Hall.findByIdAndUpdate(
+          req.body.hall,
+          { $set: floor }
+        )
+
+        floorSaved = !!hall
+      }
+    }
+
     res.json({
       saved:
         ops.length,
+      floorSaved,
     })
   }
 )
@@ -856,16 +947,7 @@ router.delete(
       req.params.id
     )
 
-    if (hallId) {
-      await Hall.findByIdAndUpdate(
-        hallId,
-        {
-          $inc: {
-            capacity: -1,
-          },
-        }
-      )
-    }
+    await syncCapacity(hallId)
 
     res.json({
       message:

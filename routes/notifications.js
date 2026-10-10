@@ -74,6 +74,30 @@ router.patch('/:id/read', async (req, res) => {
 })
 
 
+// remove only the ones already read
+router.delete('/read', async (req, res) => {
+  const result = await Notification.deleteMany({
+    user: req.user._id,
+    read: true,
+  })
+
+  res.json({
+    deleted: result.deletedCount,
+  })
+})
+
+// remove a single notification (only your own)
+router.delete('/:id', async (req, res) => {
+  await Notification.deleteOne({
+    _id: String(req.params.id),
+    user: req.user._id,
+  })
+
+  res.json({
+    ok: true,
+  })
+})
+
 router.delete('/', async (req, res) => {
   await Notification.deleteMany({
     user: req.user._id,

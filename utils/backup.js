@@ -9,6 +9,10 @@ import Attendance from '../models/Attendance.js'
 import Notice from '../models/Notice.js'
 import Feedback from '../models/Feedback.js'
 import Settings from '../models/Settings.js'
+import Hall from '../models/Hall.js'
+import AdmissionRequest from '../models/AdmissionRequest.js'
+import SeatChangeRequest from '../models/SeatChangeRequest.js'
+import AttendanceKiosk from '../models/AttendanceKiosk.js'
 
 // Everything that matters. (Notifications are left out: they are temporary.)
 
@@ -23,7 +27,12 @@ export const COLLECTIONS = {
   attendance: Attendance,
   notices: Notice,
   feedback: Feedback,
-  settings: Settings
+  settings: Settings,
+  // these were missing: without halls a restore left every seat/membership pointing at nothing
+  halls: Hall,
+  admissionRequests: AdmissionRequest,
+  seatChangeRequests: SeatChangeRequest,
+  attendanceKiosks: AttendanceKiosk,
 }
 
 export async function makeBackup() {

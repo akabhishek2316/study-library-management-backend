@@ -225,7 +225,7 @@ router.get(
     const q = {}
 
     if (student) {
-      q.student = student
+      q.student = String(student)
     }
 
     if (
@@ -484,11 +484,9 @@ router.patch(
     }
 
     const m =
-      await Membership.findByIdAndUpdate(
-        req.params.id,
-        { status },
-        { new: true }
-      )
+      await Membership.findById(
+        req.params.id
+      ).populate('shift')
 
     if (!m) {
       throw bad(
@@ -496,6 +494,41 @@ router.patch(
         'Membership not found'
       )
     }
+
+    // Bringing a cancelled membership back must not
+    // double-book a seat that was given to someone else meanwhile.
+    if (
+      m.status === 'cancelled' &&
+      status !== 'cancelled'
+    ) {
+      const student = await User.findById(
+        m.student
+      ).select('status')
+
+      if (!student || student.status !== 'active') {
+        throw bad(
+          400,
+          'Activate the student first'
+        )
+      }
+
+      const conflict = await findConflict({
+        seatId: m.seat,
+        studentId: m.student,
+        shift: m.shift,
+        startDate: m.startDate,
+        endDate: m.endDate,
+        excludeId: m._id,
+      })
+
+      if (conflict) {
+        throw bad(409, conflict)
+      }
+    }
+
+    m.status = status
+
+    await m.save()
 
     const updated =
       await populate(

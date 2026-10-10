@@ -68,9 +68,29 @@ const paymentSchema = new mongoose.Schema(
       sparse: true
     },
 
-    razorpayPaymentId: String
+    razorpayPaymentId: String,
+
+    // UPI / bank / card reference (UTR, RRN, approval code ...).
+    // Required for every method except cash. Printed on the receipt.
+    transactionId: {
+      type: String,
+      trim: true,
+      maxlength: 64
+    }
   },
   { timestamps: true }
+)
+
+// the same bank/UPI reference cannot be entered for two different payments
+paymentSchema.index(
+  { transactionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      type: 'payment',
+      transactionId: { $type: 'string' }
+    }
+  }
 )
 
 paymentSchema.index({ paidAt: -1 })
